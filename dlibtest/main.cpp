@@ -99,8 +99,7 @@ int main()
 		
 
 		one_vs_one_decision_function<ovo_trainer,
-			decision_function<poly_kernel>,  // This is the output of the poly_trainer
-			decision_function<rbf_kernel>    // This is the output of the rbf_trainer
+			decision_function<poly_kernel>  // This is the output of the poly_trainer
 		> df2, df3;
 
 
@@ -120,6 +119,8 @@ int main()
 		cout << "predicted label: " << df3(test[5]) << ", true label: 2" << endl;
 		cout << "predicted label: " << df3(test[6]) << ", true label: 3" << endl;
 		cout << "predicted label: " << df3(test[8]) << ", true label: 3" << endl;
+		cout << "predicted label: " << df3(test[9]) << ", true label: ?" << endl;
+		cout << "predicted label: " << df3(test[10]) << ", true label: ?" << endl;
 		// Test df3 on the samples and labels and print the confusion matrix.
 		cout << "test deserialized function: \n" << test_multiclass_decision_function(df3, samples, labels) << endl;
 
