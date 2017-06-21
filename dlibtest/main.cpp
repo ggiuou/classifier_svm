@@ -1,286 +1,209 @@
-#include <dlib/gui_widgets.h>
-#include <dlib/clustering.h>
-#include <dlib/string.h>
-#include <dlib/dnn.h>
-#include <dlib/image_io.h>
-#include <dlib/image_processing/frontal_face_detector.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <direct.h>
+
+
+#include <dlib/svm_threaded.h>
+
 #include <iostream>
-#include <windows.h>
-#include <string>
 #include <vector>
-#include <stack>
 
-using namespace dlib;
+#include <dlib/rand.h>
+
 using namespace std;
+using namespace dlib;
+
+// Our data will be 2-dimensional data. So declare an appropriate type to contain these points.
+typedef matrix<double, 0, 1> sample_type;
 
 // ----------------------------------------------------------------------------------------
 
-// The next bit of code defines a ResNet network.  It's basically copied
-// and pasted from the dnn_imagenet_ex.cpp example, except we replaced the loss
-// layer with loss_metric and made the network somewhat smaller.  Go read the introductory
-// dlib DNN examples to learn what all this stuff means.
-//
-// Also, the dnn_metric_learning_on_images_ex.cpp example shows how to train this network.
-// The dlib_face_recognition_resnet_model_v1 model used by this example was trained using
-// essentially the code shown in dnn_metric_learning_on_images_ex.cpp except the
-// mini-batches were made larger (35x15 instead of 5x5), the iterations without progress
-// was set to 10000, the jittering you can see below in jitter_image() was used during
-// training, and the training dataset consisted of about 3 million images instead of 55.
-template <template <int, template<typename>class, int, typename> class block, int N, template<typename>class BN, typename SUBNET>
-using residual = add_prev1<block<N, BN, 1, tag1<SUBNET>>>;
-
-template <template <int, template<typename>class, int, typename> class block, int N, template<typename>class BN, typename SUBNET>
-using residual_down = add_prev2<avg_pool<2, 2, 2, 2, skip1<tag2<block<N, BN, 2, tag1<SUBNET>>>>>>;
-
-template <int N, template <typename> class BN, int stride, typename SUBNET>
-using block = BN<con<N, 3, 3, 1, 1, relu<BN<con<N, 3, 3, stride, stride, SUBNET>>>>>;
-
-template <int N, typename SUBNET> using ares = relu<residual<block, N, affine, SUBNET>>;
-template <int N, typename SUBNET> using ares_down = relu<residual_down<block, N, affine, SUBNET>>;
-
-template <typename SUBNET> using alevel0 = ares_down<256, SUBNET>;
-template <typename SUBNET> using alevel1 = ares<256, ares<256, ares_down<256, SUBNET>>>;
-template <typename SUBNET> using alevel2 = ares<128, ares<128, ares_down<128, SUBNET>>>;
-template <typename SUBNET> using alevel3 = ares<64, ares<64, ares<64, ares_down<64, SUBNET>>>>;
-template <typename SUBNET> using alevel4 = ares<32, ares<32, ares<32, SUBNET>>>;
-
-using anet_type = loss_metric<fc_no_bias<128, avg_pool_everything<
-	alevel0<
-	alevel1<
-	alevel2<
-	alevel3<
-	alevel4<
-	max_pool<3, 3, 2, 2, relu<affine<con<32, 7, 7, 2, 2,
-	input_rgb_image_sized<150>
-	>>>>>>>>>>>>;
-
-// ----------------------------------------------------------------------------------------
-
-std::vector<matrix<rgb_pixel>> jitter_image(
-	const matrix<rgb_pixel>& img
+void generate_data(
+	std::vector<sample_type>& samples,
+	std::vector<double>& labels
 );
-
-bool ListFiles(wstring path, wstring mask, std::vector<wstring>& files);
-
-bool is_file_exist(const char *fileName);
-// ----------------------------------------------------------------------------------------
-struct info
-{
-	int count;
-	string name;
-};
+/*!
+ensures
+- make some 3 class data as described above.
+- Create 60 points from class 1
+- Create 70 points from class 2
+- Create 80 points from class 3
+!*/
 
 // ----------------------------------------------------------------------------------------
-int main(int argc, char** argv) try
+
+int main()
 {
-
-	frontal_face_detector detector = get_frontal_face_detector();
-
-	shape_predictor sp;
-	wchar_t buffer[MAX_PATH];
-	GetModuleFileName(NULL, buffer, MAX_PATH);
-	wstring ws(buffer);
-	string path(ws.begin(), ws.end());
-	path = path.substr(0, path.find_last_of("\\/") + 1);
-	deserialize(path + "shape_predictor_68_face_landmarks.dat") >> sp;
-
-	anet_type net;
-	deserialize(path + "dlib_face_recognition_resnet_model_v1.dat") >> net;
-
-	std::vector<wstring> files;
-	const size_t size = strlen(argv[1]) + 1;
-	wchar_t* path_source = new wchar_t[size];
-	mbstowcs(path_source, argv[1], size);
-
-	std::vector<matrix<rgb_pixel>> faces;
-	std::vector<string> face_names;
-	//std::vector<image_window> win_detect(10);
-	int count = 0;
-	if (ListFiles(path_source, L"*", files))
+	try
 	{
-		for (std::vector<wstring>::iterator it = files.begin();it != files.end(); ++it)
-		{
-			matrix<rgb_pixel> img;
-			string path_file_img(it->begin(), it->end());
-			load_image(img, path_file_img);
 
-			cout << "Load : " << path_file_img << endl;
 
-			string fName(path_file_img);
-			fName = fName.substr(0, fName.find_last_of("\\/"));
-			fName = fName.substr(fName.find_last_of("\\/"));
-			/*win_detect[count].set_title("face cluster " + cast_to_string(count));
-			win_detect[count].set_image(img);*/
+		std::vector<sample_type> samples, fileA, fileB, fileC, test;
+		std::vector<double> labels;
 
-			for (auto face : detector(img))
-			{
-				auto shape = sp(img, face);
-				matrix<rgb_pixel> face_chip;
-				extract_image_chip(img, get_face_chip_details(shape, 150, 0.25), face_chip);
-				faces.push_back(move(face_chip));
-				face_names.push_back(fName);
-				//win_detect[count].add_overlay(face);
-			}
-			count++;
-		}
-	}
+		wchar_t buffer[MAX_PATH];
+		GetModuleFileName(NULL, buffer, MAX_PATH);
+		wstring ws(buffer);
+		string path(ws.begin(), ws.end());
+		path = path.substr(0, path.find_last_of("\\/") + 1);
 
-	if (faces.size() == 0)
-	{
-		cout << "No faces found in image!" << endl;
-		return 1;
-	}
-	std::vector<matrix<float, 0, 1>> face_descriptors;
-	std::vector<matrix<float, 0, 1>> tmp = net(faces);
 
-	//Check descriptors file for raeding and writing
-	string path_des = path + "des.dat";
-	size_t begin = 0;
-	if (is_file_exist(path_des.c_str()))
-	{
-		deserialize(path_des) >> face_descriptors;
-		begin = face_descriptors.size();
-		face_descriptors.insert(face_descriptors.end(), tmp.begin(), tmp.end());
-	}
-	else
-		face_descriptors = tmp;
+		deserialize(path + "m.01b5zn.dat") >> fileA;
+		deserialize(path + "m.01b_88.dat") >> fileB;
+		deserialize(path + "m.01b0fq.dat") >> fileC;
 
-	serialize(path_des) << face_descriptors;
+		for (int i = 0; i < fileA.size(); i++)
+			labels.push_back(1);
+		for (int i = 0; i < fileB.size(); i++)
+			labels.push_back(2);
+		for (int i = 0; i < fileC.size(); i++)
+			labels.push_back(3);
 
-	//Prepare data for graphing
-	std::vector<sample_pair> edges;
-	for (size_t i = 0; i < face_descriptors.size(); ++i)
-	{
-		for (size_t j = i + 1; j < face_descriptors.size(); ++j)
-		{
-			if (length(face_descriptors[i] - face_descriptors[j]) < (float)atof(argv[2]))
-				edges.push_back(sample_pair(i, j));
-		}
-	}
+		samples.insert(samples.end(), fileA.begin(), fileA.end());
+		samples.insert(samples.end(), fileB.begin(), fileB.end());
+		samples.insert(samples.end(), fileC.begin(), fileC.end());
 
-	//Clustering
-	std::vector<unsigned long> labels;
-	const auto num_clusters = chinese_whispers(edges, labels);
-	cout << "number of people found in the image: " << num_clusters << endl;
+		typedef one_vs_one_trainer<any_trainer<sample_type> > ovo_trainer;
 
-	//std::vector<image_window> win_clusters(num_clusters);
-	//Check label and group them
-	array2d<rgb_pixel> img2d;
-	for (size_t cluster_id = 0; cluster_id < num_clusters; ++cluster_id)
-	{
-		std::vector<matrix<rgb_pixel>> temp;
-		string path_save(path + cast_to_string(cluster_id));
-		mkdir(path_save.c_str());
+		// Finally, make the one_vs_one_trainer.
+		ovo_trainer trainer;
 
-		for (size_t j = begin ; j < labels.size(); ++j)
-		{
-			if (cluster_id == labels[j])
-			{
-				temp.push_back(faces[j - begin]);
-				assign_image(img2d, temp.back());
-				save_jpeg(img2d, path_save + "/" + face_names[j - begin] + cast_to_string(j) + ".jpg");
-			}
+		typedef polynomial_kernel<sample_type> poly_kernel;
+		typedef radial_basis_kernel<sample_type> rbf_kernel;
 
-		}
-		/*win_clusters[cluster_id].set_title("face cluster " + cast_to_string(cluster_id));
-		win_clusters[cluster_id].set_image(tile_images(temp));*/
-	}
+		// make the binary trainers and set some parameters
+		krr_trainer<rbf_kernel> rbf_trainer;
+		svm_nu_trainer<poly_kernel> poly_trainer;
+		poly_trainer.set_kernel(poly_kernel(0.1, 1, 2));
+		rbf_trainer.set_kernel(rbf_kernel(0.1));
+		
+		trainer.set_trainer(rbf_trainer);
+		
+		trainer.set_trainer(poly_trainer);
 
-	cout << "success" << endl;
+		
+		randomize_samples(samples, labels);
+		for (int i = 0; i < labels.size(); i++)
+			cout << labels[i] << endl;
 
+		cout << "size -->" << labels.size() << endl;
+		cout << "A -->" << fileA.size() << endl;
+		cout << "B -->" << fileB.size() << endl;
+		cout << "C -->" << fileC.size() << endl;
+
+		cout << "cross validation: \n" << cross_validate_multiclass_trainer(trainer, samples, labels, 5) << endl;
+		
+		// Next, if you wanted to obtain the decision rule learned by a one_vs_one_trainer you 
+		// would store it into a one_vs_one_decision_function.
+		one_vs_one_decision_function<ovo_trainer> df = trainer.train(samples, labels);
+
+		cout << "predicted label: " << df(samples[0]) << ", true label: " << labels[0] << endl;
+		cout << "predicted label: " << df(samples[6]) << ", true label: " << labels[6] << endl;
+		
+
+		one_vs_one_decision_function<ovo_trainer,
+			decision_function<poly_kernel>,  // This is the output of the poly_trainer
+			decision_function<rbf_kernel>    // This is the output of the rbf_trainer
+		> df2, df3;
+
+
+		df2 = df;
+		serialize(path + "df.dat") << df2;
+
+		// load the function back in from disk and store it in df3.  
+		deserialize(path + "df.dat") >> df3;
+		
+		deserialize(path + "des.dat") >> test;
+
+		// Test df3 to see that this worked.
+		cout << endl;
+		cout << "predicted label: " << df3(test[2]) << ", true label: 1" << endl;
+		cout << "predicted label: " << df3(test[1]) << ", true label: 1"  << endl;
+		cout << "predicted label: " << df3(test[3]) << ", true label: 2" << endl;
+		cout << "predicted label: " << df3(test[5]) << ", true label: 2" << endl;
+		cout << "predicted label: " << df3(test[6]) << ", true label: 3" << endl;
+		cout << "predicted label: " << df3(test[8]) << ", true label: 3" << endl;
+		// Test df3 on the samples and labels and print the confusion matrix.
+		cout << "test deserialized function: \n" << test_multiclass_decision_function(df3, samples, labels) << endl;
+
+		// Finally, if you want to get the binary classifiers from inside a multiclass decision
+		// function you can do it by calling get_binary_decision_functions() like so:
+		one_vs_one_decision_function<ovo_trainer>::binary_function_table functs;
+		functs = df.get_binary_decision_functions();
+		cout << "number of binary decision functions in df: " << functs.size() << endl;
+		// The functs object is a std::map which maps pairs of labels to binary decision
+		// functions.  So we can access the individual decision functions like so:
+		decision_function<poly_kernel> df_1_2 = any_cast<decision_function<poly_kernel> >(functs[make_unordered_pair(1, 2)]);
+		//decision_function<rbf_kernel>  df_1_3 = any_cast<decision_function<rbf_kernel>  >(functs[make_unordered_pair(1, 3)]);
 	
-
-	cout << "face descriptor for one face: " << trans(face_descriptors[0]) << endl;
-	/*
-	matrix<float, 0, 1> face_descriptor = mean(mat(net(jitter_image(faces[0]))));
-	cout << "jittered face descriptor for one face: " << trans(face_descriptor) << endl;*/
-
-	cout << "hit enter to terminate" << endl;
-	cin.get();
-}
-catch (std::exception& e)
-{
-	cout << e.what() << endl;
+	}
+	catch (std::exception& e)
+	{
+		cout << "exception thrown!" << endl;
+		cout << e.what() << endl;
+	}
 }
 
 // ----------------------------------------------------------------------------------------
 
-std::vector<matrix<rgb_pixel>> jitter_image(
-	const matrix<rgb_pixel>& img
+void generate_data(
+	std::vector<sample_type>& samples,
+	std::vector<double>& labels
 )
 {
-	thread_local random_cropper cropper;
-	cropper.set_chip_dims(150, 150);
-	cropper.set_randomly_flip(true);
-	cropper.set_max_object_height(0.99999);
-	cropper.set_background_crops_fraction(0);
-	cropper.set_min_object_height(0.97);
-	cropper.set_translate_amount(0.02);
-	cropper.set_max_rotation_degrees(3);
+	const long num = 50;
 
-	std::vector<mmod_rect> raw_boxes(1), ignored_crop_boxes;
-	raw_boxes[0] = shrink_rect(get_rect(img), 3);
-	std::vector<matrix<rgb_pixel>> crops;
+	sample_type m;
 
-	matrix<rgb_pixel> temp;
-	for (int i = 0; i < 100; ++i)
+	dlib::rand rnd;
+
+
+	// make some samples near the origin
+	double radius = 0.5;
+	for (long i = 0; i < num + 10; ++i)
 	{
-		cropper(img, raw_boxes, temp, ignored_crop_boxes);
-		crops.push_back(move(temp));
-	}
-	return crops;
-}
+		double sign = 1;
+		if (rnd.get_random_double() < 0.5)
+			sign = -1;
+		m(0) = 2 * radius*rnd.get_random_double() - radius;
+		m(1) = sign*sqrt(radius*radius - m(0)*m(0));
 
-bool ListFiles(wstring path, wstring mask, std::vector<wstring>& files) {
-	HANDLE hFind = INVALID_HANDLE_VALUE;
-	WIN32_FIND_DATA ffd;
-	wstring spec;
-	stack<wstring> directories;
-
-	directories.push(path);
-	files.clear();
-
-	while (!directories.empty()) {
-		path = directories.top();
-		spec = path + L"/" + mask;
-		directories.pop();
-
-		hFind = FindFirstFile(spec.c_str(), &ffd);
-		if (hFind == INVALID_HANDLE_VALUE) {
-			return false;
-		}
-
-		do {
-			if (wcscmp(ffd.cFileName, L".") != 0 &&
-				wcscmp(ffd.cFileName, L"..") != 0) {
-				if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-					directories.push(path + L"/" + ffd.cFileName);
-				}
-				else {
-					files.push_back(path + L"/" + ffd.cFileName);
-				}
-			}
-		} while (FindNextFile(hFind, &ffd) != 0);
-
-		if (GetLastError() != ERROR_NO_MORE_FILES) {
-			FindClose(hFind);
-			return false;
-		}
-
-		FindClose(hFind);
-		hFind = INVALID_HANDLE_VALUE;
+		// add this sample to our set of training samples 
+		samples.push_back(m);
+		labels.push_back(1);
 	}
 
-	return true;
+	// make some samples in a circle around the origin but far away
+	radius = 10.0;
+	for (long i = 0; i < num + 20; ++i)
+	{
+		double sign = 1;
+		if (rnd.get_random_double() < 0.5)
+			sign = -1;
+		m(0) = 2 * radius*rnd.get_random_double() - radius;
+		m(1) = sign*sqrt(radius*radius - m(0)*m(0));
+
+		// add this sample to our set of training samples 
+		samples.push_back(m);
+		labels.push_back(2);
+	}
+
+	// make some samples in a circle around the point (25,25) 
+	radius = 4.0;
+	for (long i = 0; i < num + 30; ++i)
+	{
+		double sign = 1;
+		if (rnd.get_random_double() < 0.5)
+			sign = -1;
+		m(0) = 2 * radius*rnd.get_random_double() - radius;
+		m(1) = sign*sqrt(radius*radius - m(0)*m(0));
+
+		// translate this point away from the origin
+		m(0) += 25;
+		m(1) += 25;
+
+		// add this sample to our set of training samples 
+		samples.push_back(m);
+		labels.push_back(3);
+	}
 }
 
-bool is_file_exist(const char *fileName)
-{
-	std::ifstream infile(fileName);
-	return infile.good();
-}
+// ----------------------------------------------------------------------------------------
+
