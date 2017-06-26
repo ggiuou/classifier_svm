@@ -3,16 +3,19 @@
 using namespace std;
 using namespace dlib;
 
+bool ListFiles(wstring path, wstring mask, std::vector<wstring>& files);
 
-int main()
+int main(int argc, char** argv)
 {
 	typedef matrix<double, 0, 1> sample_type;
 
 	typedef radial_basis_kernel<sample_type> kernel_type;
 
+	typedef std::vector<sample_type> sample_set;
 
 	std::vector<sample_type> samples, tmp;
 	std::vector<double> labels;
+	std::vector<sample_set> data;
 	
 	wchar_t buffer[MAX_PATH];
 	GetModuleFileName(NULL, buffer, MAX_PATH);
@@ -21,25 +24,93 @@ int main()
 	path = path.substr(0, path.find_last_of("\\/") + 1);
 	cout << path << endl;
 
-	deserialize(path + "Ander_Herrera.dat") >> samples;
-	for (int i = 0; i < samples.size(); i++)
-		labels.push_back(-1);
-	deserialize(path + "Barack_Obama.dat") >> tmp;
-	samples.insert(samples.end(), tmp.begin(), tmp.end());
-	for (int i = 0; i < samples.size(); i++)
-		labels.push_back(+1);
- 
-	vector_normalizer<sample_type> normalizer;
-	// let the normalizer learn the mean and standard deviation of the samples
-	normalizer.train(samples);
-	// now normalize each sample
-	for (unsigned long i = 0; i < samples.size(); ++i)
-		samples[i] = normalizer(samples[i]);
+	std::vector<wstring> files;
+	const size_t size = strlen(argv[1]) + 1;
+	wchar_t* path_source = new wchar_t[size];
+	mbstowcs(path_source, argv[1], size);
 
+	cout << argv[1] << endl;
+
+	if (ListFiles(path_source, L"*", files))
+	{
+		for (std::vector<wstring>::iterator it = files.begin();it != files.end(); ++it)
+		{
+			string path_file(it->begin(), it->end());
+			cout << path_file << endl;
+			deserialize(path_file) >> tmp;
+			data.push_back(tmp);
+		}
+	}
+	
+	for (int i = 0; i < data.size(); i++)
+	{
+		for (int j = i + 1; j < data.size(); j++)
+		{
+			std::vector<double> labels;
+			std::vector<sample_type> samples;
+			samples.insert(samples.end(), data[i].begin(), data[i].end());
+			samples.insert(samples.end(), data[j].begin(), data[j].end());
+
+			for (int k = 0; k < data[i].size(); k++)
+				labels.push_back(-1);
+			for (int k = 0; k < data[j].size(); k++)
+				labels.push_back(1);
+			cout << "doing cross validation" << endl;
+			vector_normalizer<sample_type> normalizer;
+			normalizer.train(samples);
+			for (unsigned long k = 0; k < samples.size(); ++k)
+				samples[k] = normalizer(samples[k]);
+
+			randomize_samples(samples, labels);
+			const double max_nu = maximum_nu(labels);
+			svm_nu_trainer<kernel_type> trainer;
+
+			cout << "doing cross validation" << endl;
+			double gamma, nu, max = 0, m_gamma, m_nu;
+			for (gamma = 0.00001; gamma <= 1; gamma *= 5)
+			{
+				for (nu = 0.00001; nu < max_nu; nu *= 5)
+				{
+					// tell the trainer the parameters we want to use
+					trainer.set_kernel(kernel_type(gamma));
+					trainer.set_nu(nu);
+
+					cout << "gamma: " << gamma << "    nu: " << nu << endl;
+
+					matrix<double, 1, 2> res = cross_validate_trainer(trainer, samples, labels, 5);
+					cout << "     cross validation accuracy: " << res(0) << " " << res(1) << endl;
+					if (res(0) + res(1) > max)
+					{
+						max = res(0) + res(1);
+						m_gamma = gamma;
+						m_nu = nu;
+						if (max >= 2)
+							goto find;
+					}
+				}
+			}
+		find:
+			cout << "max " << m_gamma << " " << m_nu << endl;
+			trainer.set_kernel(kernel_type(m_gamma));
+			trainer.set_nu(m_nu);
+			typedef decision_function<kernel_type> dec_funct_type;
+			typedef normalized_function<dec_funct_type> funct_type;
+
+			funct_type learned_function;
+			learned_function.normalizer = normalizer;  // save normalization information
+			learned_function.function = trainer.train(samples, labels);
+
+			cout << "\nnumber of support vectors in our learned_function is "<< learned_function.function.basis_vectors.size() << endl;
+			typedef probabilistic_decision_function<kernel_type> probabilistic_funct_type;
+			typedef normalized_function<probabilistic_funct_type> pfunct_type;
+
+			pfunct_type learned_pfunct;
+			
+		}
+	}
+
+	/*
 	randomize_samples(samples, labels);
-
-	for (int i = 0; i < labels.size(); i++)
-		cout << labels[i] << endl;
 
 	const double max_nu = maximum_nu(labels);
 
@@ -81,16 +152,6 @@ int main()
 	
 	cout << "This is a +1 class example, the classifier output is " << learned_function(tmp[0]) << endl;
 
-	cout << "This is a +1 class example, the classifier output is " << learned_function(tmp[1]) << endl;
-
-	cout << "This is a +1 class example, the classifier output is " << learned_function(tmp[2]) << endl;
-
-	cout << "This is a -1 class example, the classifier output is " << learned_function(tmp[3]) << endl;
-
-	cout << "This is a -1 class example, the classifier output is " << learned_function(tmp[4]) << endl;
-
-	cout << "This is a -1 class example, the classifier output is " << learned_function(tmp[6]) << endl;
-
 	typedef probabilistic_decision_function<kernel_type> probabilistic_funct_type;
 	typedef normalized_function<probabilistic_funct_type> pfunct_type;
 
@@ -100,25 +161,6 @@ int main()
 	
 	cout << "\nnumber of support vectors in our learned_pfunct is "
 		<< learned_pfunct.function.decision_funct.basis_vectors.size() << endl;
-
-	cout << "This +1 class example should have high probability.  Its probability is: "
-		<< learned_pfunct(tmp[0]) << endl;
-
-	cout << "This +1 class example should have high probability.  Its probability is: "
-		<< learned_pfunct(tmp[1]) << endl;
-
-	cout << "This +1 class example should have high probability.  Its probability is: "
-		<< learned_pfunct(tmp[2]) << endl;
-
-	cout << "This -1 class example should have low probability.  Its probability is: "
-		<< learned_pfunct(tmp[3]) << endl;
-
-	cout << "This -1 class example should have low probability.  Its probability is: "
-		<< learned_pfunct(tmp[7]) << endl;
-
-	cout << "This -1 class example should have low probability.  Its probability is: "
-		<< learned_pfunct(tmp[6])
-		<< endl;
 
 	serialize("saved_function.dat") << learned_pfunct;
 
@@ -135,8 +177,52 @@ int main()
 	learned_function.function = reduced2(trainer, 10).train(samples, labels);
 	// And similarly for the probabilistic_decision_function: 
 	learned_pfunct.function = train_probabilistic_decision_function(reduced2(trainer, 10), samples, labels, 3);
+	*/
+	
 }
 
+bool ListFiles(wstring path, wstring mask, std::vector<wstring>& files) {
+	HANDLE hFind = INVALID_HANDLE_VALUE;
+	WIN32_FIND_DATA ffd;
+	wstring spec;
+	stack<wstring> directories;
+
+	directories.push(path);
+	files.clear();
+
+	while (!directories.empty()) {
+		path = directories.top();
+		spec = path + L"/" + mask;
+		directories.pop();
+
+		hFind = FindFirstFile(spec.c_str(), &ffd);
+		if (hFind == INVALID_HANDLE_VALUE) {
+			return false;
+		}
+
+		do {
+			if (wcscmp(ffd.cFileName, L".") != 0 &&
+				wcscmp(ffd.cFileName, L"..") != 0) {
+				if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+					directories.push(path + L"/" + ffd.cFileName);
+				}
+				else {
+					files.push_back(path + L"/" + ffd.cFileName);
+				}
+			}
+		} while (FindNextFile(hFind, &ffd) != 0);
+
+		if (GetLastError() != ERROR_NO_MORE_FILES) {
+			FindClose(hFind);
+			return false;
+		}
+
+		FindClose(hFind);
+		hFind = INVALID_HANDLE_VALUE;
+	}
+
+	return true;
+}
 
 /*
 #include <dlib/svm_threaded.h>
