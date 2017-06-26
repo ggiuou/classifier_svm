@@ -344,6 +344,9 @@
     <ClInclude Include="..\..\..\..\Downloads\dlib-19.4\dlib\external\zlib\zutil.h">
       <Filter>librrary\zlib</Filter>
     </ClInclude>
+    <ClInclude Include="Header.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\..\..\Downloads\dlib-19.4\dlib\external\libjpeg\README">

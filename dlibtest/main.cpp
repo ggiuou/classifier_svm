@@ -1,8 +1,4 @@
-#include <iostream>
-#include <dlib/svm.h>
-#include <vector>
-#include <dlib/rand.h>
-#include <dlib/svm_threaded.h>
+#include "Header.h"
 
 using namespace std;
 using namespace dlib;
@@ -10,12 +6,12 @@ using namespace dlib;
 
 int main()
 {
-	typedef matrix<double, 2, 1> sample_type;
+	typedef matrix<double, 0, 1> sample_type;
 
 	typedef radial_basis_kernel<sample_type> kernel_type;
 
 
-	std::vector<sample_type> samples;
+	std::vector<sample_type> samples, tmp;
 	std::vector<double> labels;
 	
 	wchar_t buffer[MAX_PATH];
@@ -23,27 +19,15 @@ int main()
 	wstring ws(buffer);
 	string path(ws.begin(), ws.end());
 	path = path.substr(0, path.find_last_of("\\/") + 1);
+	cout << path << endl;
 
-
-
-
-	for (int r = -20; r <= 20; ++r)
-	{
-		for (int c = -20; c <= 20; ++c)
-		{
-			sample_type samp;
-			samp(0) = r;
-			samp(1) = c;
-			samples.push_back(samp);
-
-			// if this point is less than 10 from the origin
-			if (sqrt((double)r*r + c*c) <= 10)
-				labels.push_back(+1);
-			else
-				labels.push_back(-1);
-
-		}
-	}
+	deserialize(path + "Ander_Herrera.dat") >> samples;
+	for (int i = 0; i < samples.size(); i++)
+		labels.push_back(-1);
+	deserialize(path + "Barack_Obama.dat") >> tmp;
+	samples.insert(samples.end(), tmp.begin(), tmp.end());
+	for (int i = 0; i < samples.size(); i++)
+		labels.push_back(+1);
  
 	vector_normalizer<sample_type> normalizer;
 	// let the normalizer learn the mean and standard deviation of the samples
@@ -53,6 +37,9 @@ int main()
 		samples[i] = normalizer(samples[i]);
 
 	randomize_samples(samples, labels);
+
+	for (int i = 0; i < labels.size(); i++)
+		cout << labels[i] << endl;
 
 	const double max_nu = maximum_nu(labels);
 
@@ -71,12 +58,13 @@ int main()
 
 			cout << "gamma: " << gamma << "    nu: " << nu;
 			
-			cout << "     cross validation accuracy: " << cross_validate_trainer(trainer, samples, labels, 3);
+			matrix<double, 1 , 2> res = cross_validate_trainer(trainer, samples, labels, 5);
+			cout << "     cross validation accuracy: " << res(0) << " " << res(1) << endl;
 		}
 	}
 
-	trainer.set_kernel(kernel_type(0.15625));
-	trainer.set_nu(0.15625);
+	trainer.set_kernel(kernel_type(0.00625));
+	trainer.set_nu(0.00625);
 	typedef decision_function<kernel_type> dec_funct_type;
 	typedef normalized_function<dec_funct_type> funct_type;
 
@@ -88,24 +76,20 @@ int main()
 	cout << "\nnumber of support vectors in our learned_function is "
 		<< learned_function.function.basis_vectors.size() << endl;
 
+	deserialize(path + "des.dat") >> tmp;
 	// Now let's try this decision_function on some samples we haven't seen before.
-	sample_type sample;
+	
+	cout << "This is a +1 class example, the classifier output is " << learned_function(tmp[0]) << endl;
 
-	sample(0) = 3.123;
-	sample(1) = 2;
-	cout << "This is a +1 class example, the classifier output is " << learned_function(sample) << endl;
+	cout << "This is a +1 class example, the classifier output is " << learned_function(tmp[1]) << endl;
 
-	sample(0) = 3.123;
-	sample(1) = 9.3545;
-	cout << "This is a +1 class example, the classifier output is " << learned_function(sample) << endl;
+	cout << "This is a +1 class example, the classifier output is " << learned_function(tmp[2]) << endl;
 
-	sample(0) = 13.123;
-	sample(1) = 9.3545;
-	cout << "This is a -1 class example, the classifier output is " << learned_function(sample) << endl;
+	cout << "This is a -1 class example, the classifier output is " << learned_function(tmp[3]) << endl;
 
-	sample(0) = 13.123;
-	sample(1) = 0;
-	cout << "This is a -1 class example, the classifier output is " << learned_function(sample) << endl;
+	cout << "This is a -1 class example, the classifier output is " << learned_function(tmp[4]) << endl;
+
+	cout << "This is a -1 class example, the classifier output is " << learned_function(tmp[6]) << endl;
 
 	typedef probabilistic_decision_function<kernel_type> probabilistic_funct_type;
 	typedef normalized_function<probabilistic_funct_type> pfunct_type;
@@ -117,25 +101,24 @@ int main()
 	cout << "\nnumber of support vectors in our learned_pfunct is "
 		<< learned_pfunct.function.decision_funct.basis_vectors.size() << endl;
 
-	sample(0) = 3.123;
-	sample(1) = 2;
 	cout << "This +1 class example should have high probability.  Its probability is: "
-		<< learned_pfunct(sample) << endl;
+		<< learned_pfunct(tmp[0]) << endl;
 
-	sample(0) = 3.123;
-	sample(1) = 9.3545;
 	cout << "This +1 class example should have high probability.  Its probability is: "
-		<< learned_pfunct(sample) << endl;
+		<< learned_pfunct(tmp[1]) << endl;
 
-	sample(0) = 13.123;
-	sample(1) = 9.3545;
-	cout << "This -1 class example should have low probability.  Its probability is: "
-		<< learned_pfunct(sample) << endl;
+	cout << "This +1 class example should have high probability.  Its probability is: "
+		<< learned_pfunct(tmp[2]) << endl;
 
-	sample(0) = 13.123;
-	sample(1) = 0;
 	cout << "This -1 class example should have low probability.  Its probability is: "
-		<< learned_pfunct(sample) << endl;
+		<< learned_pfunct(tmp[3]) << endl;
+
+	cout << "This -1 class example should have low probability.  Its probability is: "
+		<< learned_pfunct(tmp[7]) << endl;
+
+	cout << "This -1 class example should have low probability.  Its probability is: "
+		<< learned_pfunct(tmp[6])
+		<< endl;
 
 	serialize("saved_function.dat") << learned_pfunct;
 

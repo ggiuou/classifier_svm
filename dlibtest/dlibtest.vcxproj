@@ -257,6 +257,7 @@
     <ClInclude Include="..\..\..\..\Downloads\dlib-19.4\dlib\external\zlib\zconf.h" />
     <ClInclude Include="..\..\..\..\Downloads\dlib-19.4\dlib\external\zlib\zlib.h" />
     <ClInclude Include="..\..\..\..\Downloads\dlib-19.4\dlib\external\zlib\zutil.h" />
+    <ClInclude Include="Header.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\..\..\Downloads\dlib-19.4\dlib\external\libjpeg\README" />
